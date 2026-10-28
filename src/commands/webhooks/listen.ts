@@ -190,7 +190,7 @@ points to the local server port. The CLI will:
   5. Delete the temporary webhook on exit (Ctrl+C)
 
 The listener verifies each request with the temporary webhook signing secret.
-The signing secret is printed at startup so the --forward-to app can verify
+The signing secret is printed in the banner so the --forward-to app can verify
 the Svix headers too.
 
 Important: your tunnel must forward traffic to the same port as --port (default 4318).
@@ -422,15 +422,7 @@ For example, if using ngrok: ngrok http 4318`,
     spinner.stop('Webhook listener ready');
 
     // Print banner (the signing secret lets --forward-to apps verify Svix headers)
-    if (jsonMode) {
-      console.log(
-        JSON.stringify({
-          object: 'webhook',
-          id: webhookId,
-          signing_secret: webhookSecret,
-        }),
-      );
-    } else {
+    if (!jsonMode) {
       const eventsDisplay =
         selectedEvents.length === ALL_WEBHOOK_EVENTS.length
           ? 'all events'

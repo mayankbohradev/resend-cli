@@ -67,12 +67,6 @@ const signedHeaders = (rawBody: string) => {
   };
 };
 
-const STARTUP_LINE = JSON.stringify({
-  object: 'webhook',
-  id: 'wh_test',
-  signing_secret: WEBHOOK_SECRET,
-});
-
 const startTargetServer = (
   responseStatus: number,
 ): Promise<{
@@ -259,7 +253,7 @@ describe('webhook listen --forward-to status propagation', () => {
     expect(result.status).toBe(400);
     expect(result.body).toBe('Invalid signature');
     expect(target.requests.count).toBe(0);
-    expect(outputLogSpy?.mock.calls).toEqual([[STARTUP_LINE]]);
+    expect(outputLogSpy).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid signature before forwarding', async () => {
@@ -282,15 +276,7 @@ describe('webhook listen --forward-to status propagation', () => {
     expect(invalidResponse.status).toBe(400);
     expect(await invalidResponse.text()).toBe('Invalid signature');
     expect(target.requests.count).toBe(0);
-    expect(outputLogSpy?.mock.calls).toEqual([[STARTUP_LINE]]);
-  });
-
-  it('prints the signing secret as the first JSON line', async () => {
-    const target = await startTargetServer(200);
-    targetServer = target.server;
-    await startListener(target.port);
-
-    expect(outputLogSpy?.mock.calls[0]).toEqual([STARTUP_LINE]);
+    expect(outputLogSpy).not.toHaveBeenCalled();
   });
 
   it('shows the signing secret in the interactive banner', async () => {
