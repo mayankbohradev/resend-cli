@@ -1,8 +1,10 @@
 import { createHmac } from 'node:crypto';
 import { createServer, request as httpRequest, type Server } from 'node:http';
-import { networkInterfaces } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { listenWebhookCommand } from '../../../src/commands/webhooks/listen';
+import {
+  listenWebhookCommand,
+  MAX_BODY_BYTES,
+} from '../../../src/commands/webhooks/listen';
 import {
   captureTestEnv,
   setNonInteractive,
@@ -36,7 +38,7 @@ vi.mock('resend', async (importOriginal) => {
 const postJSON = async (
   port: number,
   body: Record<string, unknown>,
-  options: { signed?: boolean; host?: string } = {},
+  options: { signed?: boolean } = {},
 ): Promise<{ status: number; body: string }> => {
   const rawBody = JSON.stringify(body);
   const headers: Record<string, string> = {
@@ -45,7 +47,7 @@ const postJSON = async (
   if (options.signed !== false) {
     Object.assign(headers, signedHeaders(rawBody));
   }
-  const resp = await fetch(`http://${options.host ?? '127.0.0.1'}:${port}`, {
+  const resp = await fetch(`http://127.0.0.1:${port}`, {
     method: 'POST',
     headers,
     body: rawBody,
@@ -68,10 +70,11 @@ const signedHeaders = (rawBody: string) => {
   };
 };
 
-const nonLoopbackIpv4Address = (): string | undefined =>
-  Object.values(networkInterfaces())
-    .flatMap((addresses) => addresses ?? [])
-    .find((address) => address.family === 'IPv4' && !address.internal)?.address;
+const STARTUP_LINE = JSON.stringify({
+  object: 'webhook',
+  id: 'wh_test',
+  signing_secret: WEBHOOK_SECRET,
+});
 
 const startTargetServer = (
   responseStatus: number,
@@ -136,10 +139,10 @@ describe('webhook listen --forward-to status propagation', () => {
   const restoreEnv = captureTestEnv();
   let targetServer: Server | undefined;
   let outputLogSpy: ReturnType<typeof vi.spyOn> | undefined;
+  let stderrSpy: ReturnType<typeof vi.spyOn> | undefined;
 
   beforeEach(() => {
     process.env.RESEND_API_KEY = 're_test_key';
-    delete process.env.RESEND_WEBHOOK_MAX_BODY_BYTES;
     mockCreate.mockClear();
     mockRemove.mockClear();
   });
@@ -162,10 +165,23 @@ describe('webhook listen --forward-to status propagation', () => {
 
   const startListener = async (
     forwardPort: number,
-    options: { host?: string } = {},
+    options: { interactive?: boolean } = {},
   ): Promise<number> => {
     setNonInteractive();
-    outputLogSpy = setupOutputSpies().logSpy;
+    ({ logSpy: outputLogSpy, stderrSpy } = setupOutputSpies());
+    if (options.interactive) {
+      Object.defineProperty(process.stdin, 'isTTY', {
+        value: true,
+        writable: true,
+      });
+      Object.defineProperty(process.stdout, 'isTTY', {
+        value: true,
+        writable: true,
+      });
+      delete process.env.CI;
+      delete process.env.GITHUB_ACTIONS;
+      delete process.env.TERM;
+    }
 
     const listenerPort = 10_000 + Math.floor(Math.random() * 50_000);
 
@@ -176,7 +192,6 @@ describe('webhook listen --forward-to status propagation', () => {
           'https://tunnel.example.com',
           '--port',
           String(listenerPort),
-          ...(options.host ? ['--host', options.host] : []),
           '--forward-to',
           `http://127.0.0.1:${forwardPort}/webhook`,
         ],
@@ -279,7 +294,7 @@ describe('webhook listen --forward-to status propagation', () => {
     expect(result.status).toBe(400);
     expect(result.body).toBe('Invalid signature');
     expect(target.requests.count).toBe(0);
-    expect(outputLogSpy).not.toHaveBeenCalled();
+    expect(outputLogSpy?.mock.calls).toEqual([[STARTUP_LINE]]);
   });
 
   it('rejects an invalid signature before forwarding', async () => {
@@ -302,18 +317,17 @@ describe('webhook listen --forward-to status propagation', () => {
     expect(invalidResponse.status).toBe(400);
     expect(await invalidResponse.text()).toBe('Invalid signature');
     expect(target.requests.count).toBe(0);
-    expect(outputLogSpy).not.toHaveBeenCalled();
+    expect(outputLogSpy?.mock.calls).toEqual([[STARTUP_LINE]]);
   });
 
-  it('rejects a body above the configured byte limit', async () => {
-    process.env.RESEND_WEBHOOK_MAX_BODY_BYTES = '16';
+  it('rejects a body above the 1 MiB limit', async () => {
     const target = await startTargetServer(200);
     targetServer = target.server;
     const listenerPort = await startListener(target.port);
 
     const response = await postChunkedBody(
       listenerPort,
-      JSON.stringify({ type: 'email.sent', data: { id: 'too-large' } }),
+      'x'.repeat(MAX_BODY_BYTES + 1),
     );
 
     expect(response.status).toBe(413);
@@ -322,39 +336,24 @@ describe('webhook listen --forward-to status propagation', () => {
     expect(target.requests.count).toBe(0);
   });
 
-  it('binds to loopback by default', async () => {
-    const hostOption = listenWebhookCommand.options.find(
-      (option) => option.long === '--host',
-    );
-    expect(hostOption?.defaultValue).toBe('127.0.0.1');
-
+  it('prints the signing secret as the first JSON line', async () => {
     const target = await startTargetServer(200);
     targetServer = target.server;
-    const listenerPort = await startListener(target.port);
-    const address = nonLoopbackIpv4Address();
-    if (!address) {
-      return;
-    }
+    await startListener(target.port);
 
-    const response = await fetch(`http://${address}:${listenerPort}`, {
-      signal: AbortSignal.timeout(500),
-    }).catch(() => undefined);
-
-    expect(response).toBeUndefined();
+    expect(outputLogSpy?.mock.calls[0]).toEqual([STARTUP_LINE]);
   });
 
-  it('supports an explicit bind host', async () => {
+  it('shows the signing secret in the interactive banner', async () => {
     const target = await startTargetServer(200);
     targetServer = target.server;
-    const listenerPort = await startListener(target.port, { host: '0.0.0.0' });
+    await startListener(target.port, { interactive: true });
 
-    const response = await postJSON(
-      listenerPort,
-      { type: 'email.sent', data: { id: 'evt_host' } },
-      { host: '127.0.0.1' },
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.body).toBe('OK');
+    const banner = (stderrSpy?.mock.calls ?? [])
+      .map((call) => String(call[0]))
+      .join('');
+    expect(banner).toContain('Signing Secret:');
+    expect(banner).toContain(WEBHOOK_SECRET);
+    expect(outputLogSpy).not.toHaveBeenCalled();
   });
 });
