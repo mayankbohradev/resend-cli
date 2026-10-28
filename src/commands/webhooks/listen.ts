@@ -440,9 +440,7 @@ For example, if using ngrok: ngrok http 4318`,
 
       process.stderr.write('\n');
       process.stderr.write(`  ${pc.bold('Webhook:')}  ${webhookId}\n`);
-      process.stderr.write(
-        `  ${pc.bold('Signing Secret:')} ${webhookSecret}\n`,
-      );
+      process.stderr.write(`  ${pc.bold('Secret:')}   ${webhookSecret}\n`);
       process.stderr.write(`  ${pc.bold('Endpoint:')} ${url}\n`);
       process.stderr.write(`  ${pc.bold('Events:')}   ${eventsDisplay}\n`);
       process.stderr.write(

@@ -148,7 +148,10 @@ Start a local server that receives Resend webhook events in real time via a publ
 
 **Behavior:**
 1. Starts a local HTTP server on `--port`
-2. Registers a temporary Resend webhook pointing at `--url`
-3. Displays incoming events in the terminal
-4. Optionally forwards payloads to `--forward-to` with original Svix headers
-5. Deletes the temporary webhook on exit (Ctrl+C)
+2. Registers a temporary Resend webhook pointing at `--url` and prints its signing secret
+3. Verifies each request's Svix signature; missing or invalid signatures get HTTP 400 and are not displayed or forwarded
+4. Displays incoming events in the terminal
+5. Optionally forwards payloads to `--forward-to` with original Svix headers
+6. Deletes the temporary webhook on exit (Ctrl+C)
+
+In JSON mode, the first line is `{"object":"webhook","id":"<id>","signing_secret":"<whsec_...>"}`; each later line is one event. Use the signing secret to verify forwarded events in your app.

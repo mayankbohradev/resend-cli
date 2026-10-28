@@ -300,9 +300,16 @@ describe('webhook listen --forward-to status propagation', () => {
 
     const banner = (stderrSpy?.mock.calls ?? [])
       .map((call) => String(call[0]))
-      .join('');
-    expect(banner).toContain('Signing Secret:');
-    expect(banner).toContain(WEBHOOK_SECRET);
+      .join('')
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI colors
+      .replace(/\u001b\[[0-9;]*m/g, '');
+    const lines = banner.split('\n');
+    const webhookLine = lines.find((line) => line.includes('Webhook:'));
+    const secretLine = lines.find((line) => line.includes(WEBHOOK_SECRET));
+    expect(secretLine?.trim()).toBe(`Secret:   ${WEBHOOK_SECRET}`);
+    expect(secretLine?.indexOf(WEBHOOK_SECRET)).toBe(
+      webhookLine?.indexOf('wh_test'),
+    );
     expect(outputLogSpy).not.toHaveBeenCalled();
   });
 });
