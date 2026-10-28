@@ -1,10 +1,7 @@
 import { createHmac } from 'node:crypto';
-import { createServer, request as httpRequest, type Server } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  listenWebhookCommand,
-  MAX_BODY_BYTES,
-} from '../../../src/commands/webhooks/listen';
+import { listenWebhookCommand } from '../../../src/commands/webhooks/listen';
 import {
   captureTestEnv,
   setNonInteractive,
@@ -101,38 +98,6 @@ const startTargetServer = (
       const port = typeof addr === 'object' && addr ? addr.port : 0;
       resolve({ server, port, requests });
     });
-  });
-
-const postChunkedBody = (
-  port: number,
-  body: string,
-): Promise<{ status: number; body: string; connection: string | undefined }> =>
-  new Promise((resolve, reject) => {
-    const req = httpRequest(
-      {
-        host: '127.0.0.1',
-        port,
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'transfer-encoding': 'chunked',
-        },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () =>
-          resolve({
-            status: res.statusCode ?? 0,
-            body: Buffer.concat(chunks).toString(),
-            connection: res.headers.connection,
-          }),
-        );
-      },
-    );
-    req.on('error', reject);
-    req.flushHeaders();
-    req.write(body);
   });
 
 describe('webhook listen --forward-to status propagation', () => {
@@ -318,22 +283,6 @@ describe('webhook listen --forward-to status propagation', () => {
     expect(await invalidResponse.text()).toBe('Invalid signature');
     expect(target.requests.count).toBe(0);
     expect(outputLogSpy?.mock.calls).toEqual([[STARTUP_LINE]]);
-  });
-
-  it('rejects a body above the 1 MiB limit', async () => {
-    const target = await startTargetServer(200);
-    targetServer = target.server;
-    const listenerPort = await startListener(target.port);
-
-    const response = await postChunkedBody(
-      listenerPort,
-      'x'.repeat(MAX_BODY_BYTES + 1),
-    );
-
-    expect(response.status).toBe(413);
-    expect(response.body).toBe('Payload too large');
-    expect(response.connection).toBe('close');
-    expect(target.requests.count).toBe(0);
   });
 
   it('prints the signing secret as the first JSON line', async () => {

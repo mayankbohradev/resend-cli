@@ -559,11 +559,10 @@ Built-in local development helper. It:
 - Prints events in the terminal
 - Prints the temporary webhook's signing secret, so your `--forward-to` app can verify the Svix headers
 - Verifies Svix signatures before it prints or forwards events
-- Rejects request bodies over 1 MiB
 - Deletes the webhook on exit
 
 Your tunnel must forward to the same port as `--port`, e.g. `ngrok http 4318`.
-Requests with missing or invalid signatures receive HTTP 400. Oversized requests receive HTTP 413 and the connection closes. In JSON mode, the first line is `{"object":"webhook","id":"<id>","signing_secret":"<whsec_...>"}`.
+Requests with missing or invalid signatures receive HTTP 400. In JSON mode, the first line is `{"object":"webhook","id":"<id>","signing_secret":"<whsec_...>"}`.
 
 | Flag                   | Description                                                  |
 | ---------------------- | ------------------------------------------------------------ |

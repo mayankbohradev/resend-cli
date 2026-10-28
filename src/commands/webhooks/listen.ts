@@ -21,9 +21,6 @@ import { ALL_WEBHOOK_EVENTS, normalizeEvents } from './utils';
 const SVIX_HEADERS = ['svix-id', 'svix-timestamp', 'svix-signature'];
 
 const FORWARD_TIMEOUT_MS = 30_000;
-export const MAX_BODY_BYTES = 1024 * 1024;
-
-class PayloadTooLargeError extends Error {}
 
 function timestamp(): string {
   return new Date().toLocaleTimeString('en-GB', { hour12: false });
@@ -150,32 +147,11 @@ async function forwardPayload(
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
-  const maxBytes = MAX_BODY_BYTES;
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    let size = 0;
-    let tooLarge = false;
-    req.on('data', (chunk: Buffer) => {
-      if (tooLarge) {
-        return;
-      }
-      size += chunk.length;
-      if (size > maxBytes) {
-        tooLarge = true;
-        chunks.length = 0;
-        reject(new PayloadTooLargeError());
-        return;
-      }
-      chunks.push(chunk);
-    });
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => resolve(Buffer.concat(chunks).toString()));
     req.on('error', reject);
-
-    const contentLength = Number(req.headers['content-length']);
-    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-      tooLarge = true;
-      reject(new PayloadTooLargeError());
-    }
   });
 }
 
@@ -213,9 +189,9 @@ points to the local server port. The CLI will:
   4. Optionally forward payloads to --forward-to (with original Svix headers)
   5. Delete the temporary webhook on exit (Ctrl+C)
 
-The listener verifies each request with the temporary webhook signing secret
-and rejects request bodies over 1 MiB. The signing secret is printed at startup
-so the --forward-to app can verify the Svix headers too.
+The listener verifies each request with the temporary webhook signing secret.
+The signing secret is printed at startup so the --forward-to app can verify
+the Svix headers too.
 
 Important: your tunnel must forward traffic to the same port as --port (default 4318).
 For example, if using ngrok: ngrok http 4318`,
@@ -283,20 +259,7 @@ For example, if using ngrok: ngrok http 4318`,
             return;
           }
 
-          let rawBody: string;
-          try {
-            rawBody = await readBody(req);
-          } catch (err) {
-            if (err instanceof PayloadTooLargeError) {
-              res.shouldKeepAlive = false;
-              res
-                .writeHead(413, { connection: 'close' })
-                .end('Payload too large');
-              req.socket.destroySoon();
-              return;
-            }
-            throw err;
-          }
+          const rawBody = await readBody(req);
 
           const svixHeaders: Record<string, string | undefined> = {};
           for (const h of SVIX_HEADERS) {
